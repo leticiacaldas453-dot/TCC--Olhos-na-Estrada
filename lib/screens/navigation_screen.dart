@@ -4,10 +4,12 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/app_language.dart';
 import '../services/ble_manager.dart';
 import '../services/route_service.dart';
+import '../l10n/generated/app_localizations.dart';
 
 class NavigationScreen extends StatefulWidget {
   final String destination;
@@ -79,13 +81,18 @@ class _NavigationScreenState extends State<NavigationScreen> {
    // WakelockPlus.enable();
     _startNavigation();
     _routeTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshRoute());
-    _sendTimer = Timer.periodic(const Duration(seconds: 5), (_) => _sendDirectionsToEsp());
+    _sendTimer = Timer.periodic(const Duration(seconds: 3), (_) => _sendDirectionsToEsp());
     _startBackgroundService();
   }
 
   Future<void> _startBackgroundService() async {
     print('>>> [BG] Iniciando serviço...');
     final service = FlutterBackgroundService();
+
+    // Garante que o idioma está salvo
+    final lang = await AppLanguage.getLanguage();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('app_language', lang);
 
     // Verifica se já está rodando
     final isRunningBefore = await service.isRunning();
@@ -200,12 +207,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
   Future<void> _sendDirectionsToEsp() async {
     if (!BleManager.instance.isConnected || _instructions.isEmpty) return;
-    final now = DateTime.now();
-    if (now.difference(_lastInstructionSent) < const Duration(seconds: 4)) return;
-    _lastInstructionSent = now;
 
     final instruction = _instructions.firstWhere(
-      (item) => Geolocator.distanceBetween(
+          (item) => Geolocator.distanceBetween(
         _currentPos.latitude,
         _currentPos.longitude,
         item.location.latitude,
@@ -213,16 +217,131 @@ class _NavigationScreenState extends State<NavigationScreen> {
       ) > 30,
       orElse: () => _instructions.last,
     );
-    final payload = 'DIR|${instruction.text}|${_currentPos.latitude},${_currentPos.longitude}';
+
+    // Calcula a distância
+    final distance = Geolocator.distanceBetween(
+      _currentPos.latitude,
+      _currentPos.longitude,
+      instruction.location.latitude,
+      instruction.location.longitude,
+    ).round();
+
+    // Detecta a ação
+    final action = _getActionType(instruction);
+
+    // ===== CORREÇÃO AQUI =====
+    // Limpa o texto da instrução (remove nome da rua, acentos e caracteres chineses)
+    final textoLimpo = _limparTextoParaDisplay(instruction.text, action);
+
+    // Monta a string APENAS com a instrução limpa
+    final payload = 'DIR|$textoLimpo|$distance|$action|${_currentPos.latitude},${_currentPos.longitude}';
+
+    print('>>> [BLE] Enviando: $payload');
+
     try {
       await BleManager.instance.writeInstruction(payload);
     } catch (e) {
-      debugPrint("Erro ao enviar para ESP32: $e");
+      print("Erro ao enviar para ESP32: $e");
     }
+  }
+
+// ===== NOVA FUNÇÃO PARA LIMPAR O TEXTO =====
+  String _limparTextoParaDisplay(String textoOriginal, String action) {
+    String texto = textoOriginal;
+
+    // ===== PASSO 1: Remove o nome da rua com TODOS os separadores possíveis =====
+    final separadores = [
+      // ===== INGLÊS =====
+      ' onto ', ' on ', ' at ', ' in ', ' to ',
+      // ===== PORTUGUÊS =====
+      ' na ', ' no ', ' em ', ' para ',
+      // ===== ESPANHOL =====
+      ' hacia ', ' en ', ' a la ', ' al ', ' por ',
+      // ===== MANDARIM =====
+      ' 在 ', ' 到 ', ' 进入 ', '，',
+      // ===== GENÉRICO (por último) =====
+      ', ',
+    ];
+
+    for (var sep in separadores) {
+      if (texto.contains(sep)) {
+        texto = texto.split(sep)[0];
+        break; // Para no primeiro separador encontrado
+      }
+    }
+
+    // Se ficou vazio ou curto demais, usa o texto padrão baseado na ação
+    if (texto.trim().isEmpty || texto.trim().length < 3) {
+      switch (action) {
+        case 'turn_right': return 'Vire a direita';
+        case 'turn_left': return 'Vire a esquerda';
+        case 'arrive': return 'Chegou!';
+        case 'uturn': return 'Faca o retorno';
+        case 'roundabout': return 'Na rotatoria';
+        case 'keep_right': return 'Mantenha a direita';
+        case 'keep_left': return 'Mantenha a esquerda';
+        default: return 'Siga em frente';
+      }
+    }
+
+    // Remove espaços extras (mas MANTÉM acentos e caracteres chineses)
+    texto = texto.trim().replaceAll(RegExp(r'\s+'), ' ');
+
+    return texto;
+  }
+
+  String _getActionType(RouteInstruction instruction) {
+    final text = instruction.text.toLowerCase();
+
+    // ===== CHEGOU AO DESTINO =====
+    if (text.contains('chegou') || text.contains('arrived') ||
+        text.contains('llegó') || text.contains('到达') ||
+        text.contains('destino')) {
+      return 'arrive';
+    }
+
+    // ===== RETORNO (U-TURN) =====
+    if (text.contains('retorno') || text.contains('u-turn') ||
+        text.contains('giro de 180') || text.contains('掉头')) {
+      return 'uturn';
+    }
+
+    // ===== ROTATÓRIA =====
+    if (text.contains('rotatória') || text.contains('rotatoria') ||
+        text.contains('roundabout') || text.contains('glorieta') ||
+        text.contains('环岛')) {
+      return 'roundabout';
+    }
+
+    // ===== MANTENHA-SE (Y) =====
+    if (text.contains('mantenha') || text.contains('keep') ||
+        text.contains('mantenga') || text.contains('保持')) {
+      if (text.contains('direita') || text.contains('right') ||
+          text.contains('derecha') || text.contains('右')) {
+        return 'keep_right';
+      }
+      return 'keep_left';
+    }
+
+    // ===== VIRE À DIREITA =====
+    if (text.contains('direita') || text.contains('right') ||
+        text.contains('derecha') || text.contains('右')) {
+      return 'turn_right';
+    }
+
+    // ===== VIRE À ESQUERDA =====
+    if (text.contains('esquerda') || text.contains('left') ||
+        text.contains('izquierda') || text.contains('左')) {
+      return 'turn_left';
+    }
+
+    // ===== SIGA EM FRENTE (PADRÃO) =====
+    return 'straight';
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context)!;
     return Scaffold(
       body: Stack(
         children: [
@@ -273,7 +392,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
                           subtitle: Padding(
                             padding: const EdgeInsets.only(top: 4),
                             child: Text(
-                              "Destino: ${widget.destination}",
+                              "${t.destination}: ${widget.destination}",
                               style: const TextStyle(
                                 color: Color.fromARGB(217, 217, 10, 10),
                                 fontSize: 16,
@@ -290,9 +409,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text(
-                                    "Sincronizando com ESP32...",
-                                    style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold),
+                                  Text(
+                                    t.synchronizing,
+                                    style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold),
                                   ),
                                   Text(
                                     "${(_progress * 100).toInt()}%",
@@ -360,9 +479,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
                         color: Colors.black.withAlpha(180),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
-                        "ENCERRAR",
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                      child: Text(
+                        t.end,  // <-- TRADUZIDO
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                       ),
                     ),
                   ],

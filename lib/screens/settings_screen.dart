@@ -5,6 +5,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../l10n/generated/app_localizations.dart'; 
 import '../services/ble_manager.dart';
 import '../services/app_language.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import '../services/background_service.dart';
 
 
 class SettingsScreen extends StatefulWidget {
@@ -34,8 +36,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _changeLanguage(String languageCode) async {
+    // 1. Salva o idioma no SharedPreferences
     await AppLanguage.setLanguage(languageCode);
+
+    // 2. Atualiza o estado local da tela
     setState(() => _currentLanguage = languageCode);
+
+    // 3. Avisa o serviço em segundo plano para atualizar a notificação
+    final service = FlutterBackgroundService();
+    final isRunning = await service.isRunning();
+    if (isRunning) {
+      service.invoke('updateLanguage');
+      print('>>> [SETTINGS] Comando updateLanguage enviado!');
+    }
   }
 
   @override
@@ -118,10 +131,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // Histórico
           _buildSectionHeader(t.destinationHistory), // <-- Traduzido
           ...widget.history.map((h) => ListTile(leading: const Icon(Icons.history), title: Text(h))),
-          const Divider(),
-          _buildSectionHeader(t.appSettings), // <-- Traduzido
-          SwitchListTile(title: Text(t.soundAlerts), value: true, onChanged: (v) {}), // <-- Traduzido
-          SwitchListTile(title: Text(t.highAccuracyGps), value: false, onChanged: (v) {}), // <-- Traduzido
+
         ],
       ),
     );

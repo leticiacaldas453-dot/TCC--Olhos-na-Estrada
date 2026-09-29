@@ -91,4 +91,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get synchronizing => '与ESP32同步...';
+
+  @override
+  String get notificationTitle => '路上的眼睛';
+
+  @override
+  String get notificationContent => '后台导航已激活';
+
+  @override
+  String get locationNotFound => '无法获取位置';
 }

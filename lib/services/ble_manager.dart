@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 
 class BleManager {
+  static const String _kLastDeviceKey = 'last_connected_device';
   BleManager._internal();
   static final BleManager instance = BleManager._internal();
   final ValueNotifier<bool> connectionNotifier = ValueNotifier<bool>(false);
@@ -53,6 +54,7 @@ class BleManager {
         isConnected = true;
         connectedDeviceId = deviceId;
         connectionNotifier.value = true;
+        _saveLastDevice(deviceId); // <-- SALVA O deviceId
       } else if (update.connectionState == DeviceConnectionState.disconnected) {
         isConnected = false;
         connectedDeviceId = null;
@@ -84,5 +86,30 @@ class BleManager {
     final data = utf8.encode(text);
 
     await _ble.writeCharacteristicWithResponse(qc, value: data);
+  }
+
+  Future<void> _saveLastDevice(String deviceId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLastDeviceKey, deviceId);
+  }
+
+  Future<String?> getLastDevice() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kLastDeviceKey);
+  }
+
+  Future<bool> tryReconnect() async {
+    final lastDevice = await getLastDevice();
+    if (lastDevice == null) return false;
+
+    try {
+      await connectToDevice(lastDevice);
+      // Aguarda a conexão
+      await Future.delayed(const Duration(seconds: 3));
+      return isConnected;
+    } catch (e) {
+      print('>>> [BLE] Falha ao reconectar: $e');
+      return false;
+    }
   }
 }

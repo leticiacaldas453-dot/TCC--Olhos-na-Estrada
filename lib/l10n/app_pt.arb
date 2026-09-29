@@ -27,5 +27,9 @@
   "estimatedTime": "Tempo estimado",
   "startRoute": "INICIAR TRAJETO",
   "end": "ENCERRAR",
-  "synchronizing": "Sincronizando com ESP32..."
+  "synchronizing": "Sincronizando com ESP32...",
+  "notificationTitle": "Olhos na Estrada",
+  "notificationContent": "Navegação ativa em segundo plano" ,
+  "locationNotFound": "Localização não obtida" ,
+  "end": "ENCERRAR"
 }

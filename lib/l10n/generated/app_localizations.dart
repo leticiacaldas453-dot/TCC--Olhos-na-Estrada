@@ -269,6 +269,24 @@ abstract class AppLocalizations {
   /// In pt, this message translates to:
   /// **'Sincronizando com ESP32...'**
   String get synchronizing;
+
+  /// No description provided for @notificationTitle.
+  ///
+  /// In pt, this message translates to:
+  /// **'Olhos na Estrada'**
+  String get notificationTitle;
+
+  /// No description provided for @notificationContent.
+  ///
+  /// In pt, this message translates to:
+  /// **'Navegação ativa em segundo plano'**
+  String get notificationContent;
+
+  /// No description provided for @locationNotFound.
+  ///
+  /// In pt, this message translates to:
+  /// **'Localização não obtida'**
+  String get locationNotFound;
 }
 
 class _AppLocalizationsDelegate

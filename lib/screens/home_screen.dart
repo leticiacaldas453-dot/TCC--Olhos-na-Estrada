@@ -20,8 +20,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late AnimationController _animationController;
   late Animation<double> _animation;
 
-  final List<String> _searchHistory = [];
-  String _currentLocation = "Localização não obtida";
+  List<String> _searchHistory = [];
+  String _currentLocation = " ";
   List<Map<String, String>> _favorites = [];
 
   final List<String> _knownPlaces = [
@@ -31,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   ];
 
   static const String _favoritesKey = 'favorites_list';
+  static const String _historyKey = 'search_history';
   static const Color _primaryRed = Color(0xFFE10600);
   static const Color _textDark = Color(0xFF1F1F1F);
   static const Color _textGrey = Color(0xFF757575);
@@ -38,18 +39,57 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    BleManager.instance.init();
+    BleManager.instance.init().then((_) {
+      // Tenta reconectar ao último dispositivo
+      _tryReconnect();
+    });
     _animationController = AnimationController(vsync: this, duration: const Duration(seconds: 4));
     _animation = CurvedAnimation(parent: _animationController, curve: Curves.easeInOut);
     _animationController.forward();
     _fetchCurrentLocation();
     _loadFavorites();
+    _loadHistory();
+  }
+
+  Future<void> _tryReconnect() async {
+    print('>>> [BLE] Tentando reconectar ao último dispositivo...');
+    final reconnected = await BleManager.instance.tryReconnect();
+    if (reconnected && mounted) {
+      print('>>> [BLE] Reconectado com sucesso!');
+      setState(() {});
+    } else {
+      print('>>> [BLE] Não foi possível reconectar. Usuário deve conectar manualmente.');
+    }
   }
 
   @override
   void dispose() {
     _animationController.dispose();
     super.dispose();
+  }
+
+  // ==================== HISTÓRICO ====================
+
+  Future<void> _loadHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String>? history = prefs.getStringList(_historyKey);
+    print('>>> [HISTORY] Carregando histórico: $history');
+    if (history != null && mounted) {
+      setState(() {
+        _searchHistory = history;
+      });
+      print('>>> [HISTORY] Histórico carregado com sucesso! Total: ${_searchHistory.length}');
+    } else {
+      print('>>> [HISTORY] Nenhum histórico salvo.');
+    }
+  }
+
+  Future<void> _saveHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Salva apenas os 4 últimos destinos
+    final limitedHistory = _searchHistory.take(4).toList();
+    await prefs.setStringList(_historyKey, limitedHistory);
+    print('>>> [HISTORY] Histórico salvo: $limitedHistory');
   }
 
   // ==================== FAVORITOS ====================
@@ -109,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text(t.cancel, style: TextStyle(color: _textGrey)),
+              child: Text(t.cancel, style: const TextStyle(color: _textGrey)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -173,8 +213,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     setState(() {
       _searchHistory.remove(query);
       _searchHistory.insert(0, query);
-      if (_searchHistory.length > 10) _searchHistory.removeLast();
+      if (_searchHistory.length > 4) _searchHistory.removeLast();
     });
+    _saveHistory(); // <-- SALVA O HISTÓRICO
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => RouteConfirmationScreen(destination: query)),
@@ -225,7 +266,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             style: const TextStyle(color: Colors.white70, fontSize: 16),
           ),
           const SizedBox(height: 12),
-          // Campo de busca dentro do header
           Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -292,7 +332,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           child: const Icon(Icons.my_location, color: _primaryRed),
         ),
         title: Text(t.yourLocation, style: const TextStyle(fontSize: 12, color: _textGrey)),
-        subtitle: Text(_currentLocation, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: _textDark)),
+        subtitle: Text(
+          _currentLocation.isEmpty ? t.locationNotFound : _currentLocation,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: _textDark),
+        ),
         trailing: IconButton(
           icon: const Icon(Icons.refresh, color: _primaryRed),
           onPressed: _fetchCurrentLocation,
@@ -341,95 +384,95 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
     return ValueListenableBuilder<bool>(
-       valueListenable: BleManager.instance.connectionNotifier,
-       builder: (context, isConnected, child) {
-         return Scaffold(
-           backgroundColor: const Color(0xFFF5F5F5),
-           body: Stack(
-             children: [
-               Positioned.fill(
-                 child: AnimatedBuilder(
-                   animation: _animation,
-                   builder: (context, child) =>
-                       CustomPaint(
-                           painter: LinhaSPainter(progresso: _animation.value)),
-                 ),
-               ),
-               SingleChildScrollView(
-                 child: Column(
-                   crossAxisAlignment: CrossAxisAlignment.start,
-                   children: [
-                     _buildHeader(t, isConnected),
-                     const SizedBox(height: 24),
-                     Padding(
-                       padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                       child: Column(
-                         crossAxisAlignment: CrossAxisAlignment.start,
-                         children: [
-                           _buildSectionTitle(t.yourLocation, Icons
-                               .location_on),
-                           const SizedBox(height: 8),
-                           _buildLocationCard(t),
-                           const SizedBox(height: 24),
-                           Row(
-                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                             children: [
-                               _buildSectionTitle(t.favorites, Icons.star),
-                               TextButton.icon(
-                                 onPressed: () => _showAddFavoriteDialog(t: t),
-                                 icon: const Icon(Icons.add, size: 18),
-                                 label: Text(t.add),
-                                 style: TextButton.styleFrom(
-                                     foregroundColor: _primaryRed),
-                               ),
-                             ],
-                           ),
-                           const SizedBox(height: 4),
-                           if (_favorites.isEmpty)
-                             Container(
-                               width: double.infinity,
-                               padding: const EdgeInsets.all(24),
-                               decoration: BoxDecoration(
-                                 color: Colors.white,
-                                 borderRadius: BorderRadius.circular(16),
-                                 border: Border.all(
-                                     color: Colors.grey.shade200),
-                               ),
-                               child: Column(
-                                 children: [
-                                   Icon(Icons.star_border, size: 48,
-                                       color: Colors.grey),
-                                   SizedBox(height: 8),
-                                   Text(t.noFavorites, style: const TextStyle(
-                                       color: _textGrey)),
-                                   SizedBox(height: 4),
-                                   Text(t.clickToAdd, style: const TextStyle(
-                                       color: _textGrey, fontSize: 12)),
-                                 ],
-                               ),
-                             )
-                           else
-                             ..._favorites
-                                 .asMap()
-                                 .entries
-                                 .map((entry) =>
-                                 Padding(
-                                   padding: const EdgeInsets.only(bottom: 8),
-                                   child: _buildFavoriteCard(entry.key, t),
-                                 )),
-                           const SizedBox(height: 40),
-                         ],
-                       ),
-                     ),
-                   ],
-                 ),
-               ),
-             ],
-           ),
-         );
-    },
-  );
-}
+      valueListenable: BleManager.instance.connectionNotifier,
+      builder: (context, isConnected, child) {
+        return Scaffold(
+          backgroundColor: const Color(0xFFF5F5F5),
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: AnimatedBuilder(
+                  animation: _animation,
+                  builder: (context, child) =>
+                      CustomPaint(
+                          painter: LinhaSPainter(progresso: _animation.value)),
+                ),
+              ),
+              SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(t, isConnected),
+                    const SizedBox(height: 24),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildSectionTitle(t.yourLocation, Icons.location_on),
+                          const SizedBox(height: 8),
+                          _buildLocationCard(t),
+                          const SizedBox(height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: _buildSectionTitle(t.favorites, Icons.star),
+                              ),
+                              TextButton.icon(
+                                onPressed: () => _showAddFavoriteDialog(t: t),
+                                icon: const Icon(Icons.add, size: 18),
+                                label: Text(t.add),
+                                style: TextButton.styleFrom(foregroundColor: _primaryRed),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          if (_favorites.isEmpty)
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: Colors.grey.shade200),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Icon(Icons.star_border, size: 48,
+                                      color: Colors.grey),
+                                  const SizedBox(height: 8),
+                                  Text(t.noFavorites, style: const TextStyle(
+                                      color: _textGrey)),
+                                  const SizedBox(height: 4),
+                                  Text(t.clickToAdd, style: const TextStyle(
+                                      color: _textGrey, fontSize: 12)),
+                                ],
+                              ),
+                            )
+                          else
+                            ..._favorites
+                                .asMap()
+                                .entries
+                                .map((entry) =>
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: _buildFavoriteCard(entry.key, t),
+                                )),
+                          const SizedBox(height: 40),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class LinhaSPainter extends CustomPainter {

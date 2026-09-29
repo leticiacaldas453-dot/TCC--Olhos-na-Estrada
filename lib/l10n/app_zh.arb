@@ -27,5 +27,9 @@
   "estimatedTime": "预计时间",
   "startRoute": "开始路线",
   "end": "结束",
-  "synchronizing": "与ESP32同步..."
+  "synchronizing": "与ESP32同步..." ,
+  "notificationTitle": "路上的眼睛",
+  "notificationContent": "后台导航已激活" ,
+  "locationNotFound": "无法获取位置" ,
+  "end": "结束"
 }

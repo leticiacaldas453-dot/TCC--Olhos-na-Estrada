@@ -91,4 +91,13 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get synchronizing => 'Sincronizando com ESP32...';
+
+  @override
+  String get notificationTitle => 'Olhos na Estrada';
+
+  @override
+  String get notificationContent => 'Navegação ativa em segundo plano';
+
+  @override
+  String get locationNotFound => 'Localização não obtida';
 }
